@@ -10,8 +10,8 @@ import OpenSSL
 
 class myRSA: NSObject {
 
-    //#define KEY_LENGTH 2048
-    let KEY_LENGTH:Int32 = 2048;
+    //#define RSA_KEY_LENGTH 2048
+    let RSA_KEY_LENGTH:Int32 = 2048;
     //#define PUB_EXP     3
     let PUB_EXP:UInt = 3;
 
@@ -19,10 +19,10 @@ class myRSA: NSObject {
     public func rsaEncDec() {
 
         // Generate key pair
-        print("Generating RSA (\(KEY_LENGTH)) bits keypair...");
+        print("Generating RSA (\(RSA_KEY_LENGTH)) bits keypair...");
         
-        //RSA *keypair = RSA_generate_key(KEY_LENGTH, PUB_EXP, NULL, NULL);
-        guard let keypair = RSA_generate_key(KEY_LENGTH, PUB_EXP, nil, nil) else {
+        //RSA *keypair = RSA_generate_key(RSA_KEY_LENGTH, PUB_EXP, NULL, NULL);
+        guard let keypair = RSA_generate_key(RSA_KEY_LENGTH, PUB_EXP, nil, nil) else {
             print("ABORT")
             abort()
         }
@@ -61,7 +61,7 @@ class myRSA: NSObject {
         let CCHAR_ALIGNMENT = MemoryLayout<CChar>.alignment
         
         // Add 1 extra character for null termination for the following variables
-        let bytes = KEY_LENGTH / Int32(CCHAR_LENGTH) + 1
+        let bytes = RSA_KEY_LENGTH / Int32(CCHAR_LENGTH) + 1
         let pri_key = UnsafeMutableRawPointer.allocate(bytes: pri_len + 1, alignedTo: CCHAR_ALIGNMENT)
         defer {
             pri_key.deallocate(bytes: pri_len + 1, alignedTo: CCHAR_ALIGNMENT)
