@@ -112,7 +112,8 @@ extension myRSA {
         }
 
         //  int EVP_SealUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, unsigned char *in, int inl);
-        // We really want to use EVP_SealUpdate but symbols don't resolve. So based on evp.h:
+        // EVP_SealUpdate is a complex macros and therefore the compiler doesnt
+        // convert it directly to swift. So based on evp.h:
         // # define EVP_SealUpdate(a,b,c,d,e)       EVP_EncryptUpdate(a,b,c,d,e)
         status = EVP_EncryptUpdate(myRSA.rsaEncryptCtx, enc, &encLength, plaintext, Int32(plaintext.count))
         guard status == pubKeyCount else {
@@ -165,7 +166,8 @@ extension myRSA {
             return false
         }
 
-        // We really want to use EVP_OpenUpdate but symbols don't resolve. So based on evp.h:
+        // EVP_OpenUpdate is a complex macros and therefore the compiler doesnt
+        // convert it directly to swift. So based on evp.h:
         // # define EVP_OpenUpdate(a,b,c,d,e)       EVP_DecryptUpdate(a,b,c,d,e)
         status = EVP_DecryptUpdate(myRSA.rsaDecryptCtx, decrypted, &processedLen, ciphertext, cipherLength)
         guard status != 0 else {
