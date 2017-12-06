@@ -17,7 +17,7 @@ extension myRSA {
     static var rsaEncryptCtx: UnsafeMutablePointer<EVP_CIPHER_CTX>? = nil
     static var rsaDecryptCtx: UnsafeMutablePointer<EVP_CIPHER_CTX>? = nil
 
-    typealias PtrToPtr = UnsafeMutablePointer<UInt8>?
+    typealias UInt8Ptr = UnsafeMutablePointer<UInt8>?
 
     public func generateRSAKey() -> Bool {
         
@@ -70,6 +70,7 @@ extension myRSA {
     
     
     //        rsaEncrypt(unsigned char **encMsg, unsigned char **ek, size_t *ekl, unsigned char **iv, size_t *ivl) {
+    // Uses aes_256_cbc
     public func rsaEncrypt(plaintext: String,
                            ciphertext: inout UnsafeMutablePointer<UInt8>? ,
                            cipherLength: inout Int32,
@@ -79,25 +80,33 @@ extension myRSA {
                            IVLength: inout Int32 ) -> Bool {
         
         var encLength: Int32 = 0
-        var ek: PtrToPtr
-        ek = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(EVP_PKEY_size(myRSA.rsaKeypair)))
+        let pubKeyCount = 1   // using only 1 public key pair
+        // All Seal*() return 0 on error or npubk if successful
         
-        // we need to create an array of pointers with ek
-        let ekPtr = UnsafeMutablePointer<PtrToPtr>.allocate(capacity: MemoryLayout<PtrToPtr>.size)
+        // unsigned char **ek
+        // ek is an array of buffers where the public key encrypted secret key will be written,
+        // each buffer must contain enough room for the corresponding encrypted key:
+        // that is ek[i] must have room for EVP_PKEY_size(pubk[i]) bytes.
+        // Here we are only using 1 public key, so ek[] has only 1 entry
+        // In Swift, to do (unsigned char **ek), we have to do a little typealias'ing trick and
+        // create a new pointer that point to the original pointer
+        var ek: UInt8Ptr
+        ek = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(EVP_PKEY_size(myRSA.rsaKeypair)))
+        let ekPtr = UnsafeMutablePointer<UInt8Ptr>.allocate(capacity: MemoryLayout<UInt8Ptr>.size)
         ekPtr.pointee = ek
-
-//        IVLength = EVP_CIPHER_CTX_iv_length(myRSA.rsaEncryptCtx) // EVP_MAX_IV_LENGTH
-        IVLength = EVP_MAX_IV_LENGTH
+        
+        // assign size of the corresponding cipher's IV
+        IVLength = EVP_CIPHER_iv_length(EVP_aes_256_cbc()) // EVP_MAX_IV_LENGTH
         let iv = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(IVLength))
         
         let enc = UnsafeMutablePointer<UInt8>.allocate(capacity: plaintext.count + Int(IVLength))
 
         // initializes a cipher context ctx for encryption with cipher type using a random secret key and IV.
         // The secret key is encrypted using the public key (can be a set of public keys)
-        // ek size = EVP_PKEY_size(pubk[i]) bytes
-        // iv must contain enough room for the corresponding cipher's IV, as determined by (for example) EVP_CIPHER_iv_length(type).
+        // Here we are using just 1 public key
         var status = EVP_SealInit(myRSA.rsaEncryptCtx, EVP_aes_256_cbc(), ekPtr, &encKeyLength, iv, &myRSA.rsaKeypair, 1)
-        guard status != 0 else {
+        // SealInit should return the number of public keys that were input, here it is only 1
+        guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
             return false
         }
@@ -106,14 +115,14 @@ extension myRSA {
         // We really want to use EVP_SealUpdate but symbols don't resolve. So based on evp.h:
         // # define EVP_SealUpdate(a,b,c,d,e)       EVP_EncryptUpdate(a,b,c,d,e)
         status = EVP_EncryptUpdate(myRSA.rsaEncryptCtx, enc, &encLength, plaintext, Int32(plaintext.count))
-        guard status != 0 else {
+        guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
             return false
         }
         cipherLength = encLength
 
         status = EVP_SealFinal(myRSA.rsaEncryptCtx, enc.advanced(by: Int(cipherLength)), &encLength)
-        guard status != 0 else {
+        guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
             return false
         }
