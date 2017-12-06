@@ -10,9 +10,7 @@ import OpenSSL
 
 class myRSA: NSObject {
 
-    //#define RSA_KEY_LENGTH 2048
     let RSA_KEY_LENGTH:Int32 = 2048;
-    //#define PUB_EXP     3
     let PUB_EXP:UInt = 3;
 
 
