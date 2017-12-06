@@ -99,91 +99,72 @@ class myAES: NSObject {
     
     //        int Crypto::aesEncrypt(const unsigned char *msg, size_t msgLen, unsigned char **encMsg)
     //
-    //  Assigns memory to encMsg. Responsibility of the caller to release memory
-    public func evpAESEncrypt(plaintext: String) ->
-                                    (   UnsafeMutablePointer<UInt8>? ,  // ciphertext
-                                        Int32 ) {                       // cipherLength
-
-    
-//        public func evpAESEncrypt(plaintext: String ) -> (Data)
+    public func evpAESEncrypt(plaintext: String) -> Data? {
 
         // set up cipher context for encryption with cipher type EVP_aes_256_cbc()
         // return 1 for success and 0 for failure.
         var status = EVP_EncryptInit_ex(myAES.aesEncryptCtx, EVP_aes_256_cbc(), nil, myAES.aesKey, myAES.aesIV)
         if(status == 0) {
             print("FAILURE at EVP_EncryptInit_ex")
-            return (nil, 0)
+            return nil
         }
-        
-        print("Plaintext (\(plaintext.utf8.count)): \"\(plaintext)\"");
         
         var encLength: Int32 = 0
-        var cipherLength = encLength
+        var processedLength = encLength
         let enc = UnsafeMutablePointer<UInt8>.allocate(capacity: plaintext.count + myAES.aesKeyLen - 1)
-        // initialize memory to null
-        enc.initialize(to: 0, count: plaintext.count + myAES.aesKeyLen)
         
-//        let enc_str = String(cString: UnsafePointer(enc))
-//        print("Ciphertext (\(cipherLength))= \"\(enc_str.data(using: .utf8)?.hexEncodedString() ?? "NULL")\"")
-
         // ciphertext = out, outl where outl = [0 ... (inl + cipher_block_size - 1) ]
         // return 1 for success and 0 for failure.
-        status = EVP_EncryptUpdate(myAES.aesEncryptCtx, enc, &encLength, plaintext, Int32(plaintext.count))
-        
-        cipherLength = cipherLength + encLength;
+        status = EVP_EncryptUpdate(myAES.aesEncryptCtx, enc, &processedLength, plaintext, Int32(plaintext.count))
+        encLength = processedLength
         
         // encrypts the "final" data, that is any data that remains in a partial block.
-        status = EVP_EncryptFinal_ex(myAES.aesEncryptCtx, enc.advanced(by: Int(cipherLength)), &encLength)
+        status = EVP_EncryptFinal_ex(myAES.aesEncryptCtx, enc.advanced(by: Int(encLength)), &processedLength)
         if(status == 0) {
             print("FAILURE at EVP_EncryptInit_ex")
-            return (nil, 0)
+            return nil
         }
-        cipherLength = cipherLength + encLength;
-        
-        let encrypted_str = String(cString: UnsafePointer(enc))
-        
-//        print("Ciphertext (\(cipherLength))= \(encrypted_str)")
-        print("Ciphertext (\(cipherLength))= \(encrypted_str.data(using: .utf8)?.hexEncodedString() ?? "NULL")")
+        encLength = encLength + processedLength
 
         EVP_CIPHER_CTX_cleanup(myAES.aesEncryptCtx);
         
-        return (enc, cipherLength)
+        return Data(bytes: enc, count: Int(encLength))
     }
     
-    public func evpAESDecrypt(ciphertext: UnsafeMutablePointer<UInt8> ,
-                              cipherLength: Int32)
-                                    -> ( UnsafeMutablePointer<UInt8>? ,     // decMsg
-                                         Int32) {                           // decMsgLength
-        
+    // returns decrypted message
+    public func evpAESDecrypt(ciphertext: Data) -> Data? {
+    
         var decMsgLength: Int32 = 0
         var processedLen: Int32 = 0
         
-        let decrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(cipherLength))
+        let decrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(ciphertext.count))
         
         var status = EVP_DecryptInit_ex(myAES.aesDecryptCtx, EVP_aes_256_cbc(), nil, myAES.aesKey, myAES.aesIV)
         if (status == 0) {
             print("FAILURE at EVP_DecryptInit_ex")
-            return (nil, 0)
+            return nil
         }
         
-        status = EVP_DecryptUpdate(myAES.aesDecryptCtx, decrypted, &processedLen, ciphertext, cipherLength)
+        status = ciphertext.withUnsafeBytes({ (enc: UnsafePointer<UInt8>) -> Int32 in
+            return EVP_DecryptUpdate(myAES.aesDecryptCtx, decrypted, &processedLen, enc, Int32(ciphertext.count))
+        })
+        
         if (status == 0) {
             print("FAILURE at EVP_DecryptUpdate")
-            return (nil, 0)
+            return nil
         }
         decMsgLength = processedLen
         
         status = EVP_DecryptFinal_ex(myAES.aesDecryptCtx, decrypted.advanced(by: Int(decMsgLength)), &processedLen)
         if (status == 0) {
             print("FAILURE at EVP_DecryptFinal_ex")
-            return (nil, 0)
+            return nil
         }
         decMsgLength = decMsgLength + processedLen
         
         EVP_CIPHER_CTX_cleanup(myAES.aesDecryptCtx);
         
-        return ( decrypted, decMsgLength)
-//            return Data(bytes: decrypted, count: Int(decMsgLength))
+        return Data(bytes: decrypted, count: Int(decMsgLength))
     }
     
 }

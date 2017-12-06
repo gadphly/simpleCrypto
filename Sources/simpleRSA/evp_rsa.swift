@@ -75,17 +75,13 @@ extension myRSA {
     // Uses aes_256_cbc for envelope
     // Takes in a plaintext, then generates an AES key and IV for aes_256_cbc encryption of the plaintext
     // encrypts the key using the RSA key context has been initialized with.
-    public func rsaEncrypt(plaintext: String)
-                                                                    // Output:
-                               -> ( UnsafeMutablePointer<UInt8>? ,  // ciphertext
-                                    Int32,                          // ciphertextLength
-                                    UnsafeMutablePointer<UInt8>? ,  // encKey
-                                    Int32,                          // encKeyLength
-                                    UnsafeMutablePointer<UInt8>? ,  // IV
-                                    Int32 ) {                       // IVLength
+    public func rsaEncrypt(plaintext: String) -> (  Data? ,  // ciphertext
+                                                    Data? ,  // encKey
+                                                    Data?) { // IV
 
         var processedLength: Int32 = 0
-        var cipherLength: Int32 = 0
+        var encLength: Int32 = 0
+                                                        
         let pubKeyCount = 1   // using only 1 public key pair
         // All Seal*() return 0 on error or npubk if successful
 
@@ -111,11 +107,11 @@ extension myRSA {
         // initializes a cipher context ctx for encryption with cipher type using a random secret key and IV.
         // The secret key is encrypted using the public key (can be a set of public keys)
         // Here we are using just 1 public key
-                                        var status = EVP_SealInit(myRSA.rsaEncryptCtx, EVP_aes_256_cbc(), ekPtr, &encKeyLength, iv, &myRSA.rsaKeypair, 1)
+        var status = EVP_SealInit(myRSA.rsaEncryptCtx, EVP_aes_256_cbc(), ekPtr, &encKeyLength, iv, &myRSA.rsaKeypair, 1)
         // SealInit should return the number of public keys that were input, here it is only 1
         guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
-            return (nil, 0, nil, 0, nil, 0)
+            return (nil, nil, nil)
         }
 
         //  int EVP_SealUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, unsigned char *in, int inl);
@@ -125,58 +121,57 @@ extension myRSA {
         status = EVP_EncryptUpdate(myRSA.rsaEncryptCtx, enc, &processedLength, plaintext, Int32(plaintext.count))
         guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
-            return (nil, 0, nil, 0, nil, 0)
+            return (nil, nil, nil)
         }
-        cipherLength = processedLength
+        encLength = processedLength
 
-        status = EVP_SealFinal(myRSA.rsaEncryptCtx, enc.advanced(by: Int(cipherLength)), &processedLength)
+        status = EVP_SealFinal(myRSA.rsaEncryptCtx, enc.advanced(by: Int(encLength)), &processedLength)
         guard status == pubKeyCount else {
             print("FAILURE at EVP_SealInit")
-            return (nil, 0, nil, 0, nil, 0)
+            return (nil, nil, nil)
         }
-        cipherLength = cipherLength + processedLength
-        let ekLength = encKeyLength
-
-        let encrypted_str = String(cString: UnsafePointer(enc))
-        print("Ciphertext (\(cipherLength))= \(encrypted_str)")
+        encLength = encLength + processedLength
 
         EVP_CIPHER_CTX_cleanup(myRSA.rsaEncryptCtx);
         
-        return (enc, cipherLength, ek, ekLength, iv, IVLength)
+        return ( Data(bytes: enc, count: Int(encLength)),
+                 Data(bytes: ek!, count: Int(encKeyLength)),
+                 Data(bytes: iv, count: Int(IVLength)) )
     }
     
-    public func rsaDecryption(ciphertext: UnsafeMutablePointer<UInt8> ,
-                                  cipherLength: Int32,
-                                  encKey: UnsafeMutablePointer<UInt8> ,
-                                  encKeyLength: Int32,
-                                  IV: UnsafeMutablePointer<UInt8> ,
-                                  IVLength: Int32 )
-                                                                            // Output:
-                                        -> ( UnsafeMutablePointer<UInt8>?,  // decMsg
-                                             Int32) {                       // decMsgLen
+    // returns decrypted message
+    public func rsaDecryption(ciphertext: Data, encKey: Data, IV: Data ) -> Data? {
         
         // This is the number of bytes that each EVP_DecryptUpdate/EVP_DecryptFinal decrypts.
         // The sum of processedLen is the total size of the decrypted message (decMsgLen)
         var processedLen: Int32 = 0
         var decMsgLen: Int32 = 0
         
-        let decrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(cipherLength + IVLength))
-        decrypted.initialize(to: 0, count: Int(cipherLength + IVLength))
+        let decrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(ciphertext.count + IV.count))
+        decrypted.initialize(to: 0, count: Int(ciphertext.count + IV.count))
         
         // EVP_OpenInit returns 0 on error or a non zero integer (actually the recovered secret key size) if successful
-        var status = EVP_OpenInit(myRSA.rsaDecryptCtx, EVP_aes_256_cbc(), encKey, encKeyLength, IV, myRSA.rsaKeypair)
+        var status = encKey.withUnsafeBytes({ (ek: UnsafePointer<UInt8>) -> Int32 in
+            return IV.withUnsafeBytes({ (iv: UnsafePointer<UInt8>) -> Int32 in
+                return EVP_OpenInit(myRSA.rsaDecryptCtx, EVP_aes_256_cbc(), ek, Int32(encKey.count), iv, myRSA.rsaKeypair)
+            })
+        })
+
+            
         guard status != EVP_CIPHER_key_length(EVP_aes_256_cbc()) else {
             print("FAILURE at EVP_OpenInit")
-            return (nil, 0)
+            return nil
         }
 
         // EVP_OpenUpdate is a complex macros and therefore the compiler doesnt
         // convert it directly to swift. From /usr/local/opt/openssl/include/openssl/evp.h:
         // # define EVP_OpenUpdate(a,b,c,d,e)       EVP_DecryptUpdate(a,b,c,d,e)
-        status = EVP_DecryptUpdate(myRSA.rsaDecryptCtx, decrypted, &processedLen, ciphertext, cipherLength)
+        status = ciphertext.withUnsafeBytes({ (enc: UnsafePointer<UInt8>) -> Int32 in
+            return EVP_DecryptUpdate(myRSA.rsaDecryptCtx, decrypted, &processedLen, enc, Int32(ciphertext.count))
+        })
         guard status != 0 else {
             print("FAILURE at EVP_DecryptUpdate")
-            return (nil, 0)
+            return nil
         }
         
         decMsgLen = processedLen;
@@ -184,15 +179,12 @@ extension myRSA {
         status = EVP_OpenFinal(myRSA.rsaDecryptCtx, decrypted.advanced(by: Int(decMsgLen)), &processedLen)
         guard status != 0 else {
             print("FAILURE at EVP_OpenFinal")
-            return (nil, 0)
+            return nil
         }
         decMsgLen = decMsgLen + processedLen
-
-        let decrypted_str = String(cString: UnsafePointer(decrypted))
-        print("DECRYPTED (\(decMsgLen))= \(decrypted_str.data(using: .utf8)?.hexEncodedString() ?? "NULL")")
         
         EVP_CIPHER_CTX_cleanup(myRSA.rsaDecryptCtx);
-        return ( decrypted, decMsgLen)
+        return Data(bytes: decrypted, count: Int(decMsgLen))
     }
     
 }
