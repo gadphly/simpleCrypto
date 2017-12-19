@@ -39,6 +39,12 @@ extension myRSA {
             return false
         }
         
+        // EVP_PKEY_CTX_set_rsa_padding is a complex macro. From rsa.h:
+        // # define EVP_PKEY_CTX_set_rsa_padding(ctx, pad) EVP_PKEY_CTX_ctrl(ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, pad, NULL)
+        
+        EVP_PKEY_CTX_ctrl(ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, RSA_PKCS1_OAEP_PADDING, nil)
+
+        
         if(EVP_PKEY_keygen(ctx, &myRSA.rsaKeypair) <= 0) {
             print("FAILURE at EVP_PKEY_keygen")
             return false
@@ -47,14 +53,6 @@ extension myRSA {
         return true
     }
     
-    public func evpRSADeinit() {
-        
-        let EVP_CIPHER_CTX_LENGTH = MemoryLayout<EVP_CIPHER_CTX>.size
-
-        myRSA.rsaEncryptCtx?.deallocate(capacity: EVP_CIPHER_CTX_LENGTH)
-        myRSA.rsaDecryptCtx?.deallocate(capacity: EVP_CIPHER_CTX_LENGTH)
-    }
-
     // Creates the AES key and IV
     public func evpRSAInit() -> Bool {
         
@@ -65,12 +63,27 @@ extension myRSA {
         myRSA.rsaEncryptCtx = UnsafeMutablePointer<EVP_CIPHER_CTX>.allocate(capacity: EVP_CIPHER_CTX_LENGTH)
         myRSA.rsaDecryptCtx = UnsafeMutablePointer<EVP_CIPHER_CTX>.allocate(capacity: EVP_CIPHER_CTX_LENGTH)
         
+        // set some of the options
+        EVP_CIPHER_CTX_set_padding(myRSA.rsaEncryptCtx, RSA_PKCS1_OAEP_PADDING)
+        
         EVP_CIPHER_CTX_init(myRSA.rsaEncryptCtx);
         EVP_CIPHER_CTX_init(myRSA.rsaDecryptCtx);
         
         return true
     }
     
+    public func evpRSADeinit() {
+        
+        let EVP_CIPHER_CTX_LENGTH = MemoryLayout<EVP_CIPHER_CTX>.size
+        
+        myRSA.rsaEncryptCtx?.deallocate(capacity: EVP_CIPHER_CTX_LENGTH)
+        myRSA.rsaDecryptCtx?.deallocate(capacity: EVP_CIPHER_CTX_LENGTH)
+        
+        if (myRSA.rsaKeypair != nil) {
+            EVP_PKEY_free(myRSA.rsaKeypair)
+        }
+
+    }
     
     // Uses aes_256_cbc for envelope
     // Takes in a plaintext, then generates an AES key and IV for aes_256_cbc encryption of the plaintext
@@ -185,6 +198,190 @@ extension myRSA {
         
         EVP_CIPHER_CTX_cleanup(myRSA.rsaDecryptCtx);
         return Data(bytes: decrypted, count: Int(decMsgLen))
+    }
+    
+    
+    // generate rsa key before calling this function
+    // returns a signature even though we are verifying the signature here anyway
+    public func evpDigestSignVerifyVanilla(of message: String) -> Data? {
+        
+        print("Sign: \(message) ")
+        
+        // EVP_MD_CTX_create() renamed to _new
+        let md_ctx = EVP_MD_CTX_create()
+        let md_ctx_verify = EVP_MD_CTX_create()
+        
+        // OpenSSL_add_all_digests()
+        // The digest table must be initialized using, for example, OpenSSL_add_all_digests() for these functions to work.
+        // let md = EVP_get_digestbyname("SHA256")
+        // check if md is not null. ALternative we can use functions like EVP_sha256()
+        
+        var rc = EVP_DigestSignInit(md_ctx, nil, EVP_sha256(), nil, myRSA.rsaKeypair)
+        // check rc = 1
+
+        // rc = EVP_DigestSignUpdate(md_ctx, message, message.count)
+        // complex macro, so replace with what's in evp.h
+        rc = EVP_DigestUpdate(md_ctx, message, message.count)
+        // check rc = 1
+
+        // Determine the size of the signature.
+        var sig_len: Int = Int(EVP_PKEY_size(myRSA.rsaKeypair))
+        let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
+
+        // Alternatively, we can use the following method to get the size of the signature
+//        rc = EVP_DigestSignFinal(md_ctx, nil, &sig_len)
+//        print("lengths = \(sig_len), \(EVP_PKEY_size(myRSA.rsaKeypair)) ")
+//        if (sig_len != EVP_PKEY_size(myRSA.rsaKeypair)) {
+//            print("These two signature lengths should match! ")
+//            return nil
+//        }
+
+        rc = EVP_DigestSignFinal(md_ctx, sig, &sig_len)
+        guard rc == 1 else {
+            print("EVP_DigestSignFinal failure: \( ERR_get_error())")
+            return nil
+        }
+
+        print("signature (\(sig_len)) = \(Data(bytes: sig, count: sig_len).hexEncodedString())")
+        
+        // Verify signature just produced
+        rc = EVP_DigestVerifyInit(md_ctx_verify, nil, EVP_sha256(), nil, myRSA.rsaKeypair)
+        // check rc = 1
+
+        // rc = EVP_DigestVerifyUpdate(md_ctx_verify, message, message.count)
+        // complex macro
+        rc = EVP_DigestUpdate(md_ctx_verify, message, message.count)
+        // check rc = 1
+
+        // Unlike other return values, this return indicates if signature verifies or not
+        rc = EVP_DigestVerifyFinal(md_ctx_verify, sig, sig_len)
+        print("signature verified = \(rc == 1 ? "OK" : "FAIL")")
+        
+        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_destroy(md_ctx_verify);
+        // EVP_PKEY_free(myRSA.rsaKeypair)
+
+        return Data(bytes: sig, count: sig_len)
+    }
+
+    // This is for alternative signing operations such as different padding schemes
+    public func evpDigestSignVerifyCustom(of message: String) -> Data? {
+        
+        print("Sign: \(message) ")
+        
+        // EVP_MD_CTX_create() renamed to EVP_MD_CTX_new()
+        let md_ctx = EVP_MD_CTX_create()
+        let md_ctx_verify = EVP_MD_CTX_create()
+        
+        // custom signing
+        var pkey_ctx = EVP_PKEY_CTX_new(myRSA.rsaKeypair, nil)
+        
+//        EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)
+//        complex macro need to be replaced
+        EVP_PKEY_CTX_ctrl(pkey_ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, RSA_X931_PADDING, nil)
+//        EVP_PKEY_CTX_set_signature_md()
+        
+        var rc = EVP_DigestSignInit(md_ctx, &pkey_ctx, EVP_sha256(), nil, myRSA.rsaKeypair)
+        // check rc = 1
+        
+        // rc = EVP_DigestSignUpdate(md_ctx, message, message.count)
+        // complex macro, so replace with what's in evp.h
+        rc = EVP_DigestUpdate(md_ctx, message, message.count)
+        // check rc = 1
+        
+        // Determine the size of the signature.
+        var sig_len: Int = Int(EVP_PKEY_size(myRSA.rsaKeypair))
+        let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
+        
+        rc = EVP_DigestSignFinal(md_ctx, sig, &sig_len)
+        print("Signed = \(rc == 1 ? "OK" : "FAIL")")
+        
+//        print("signature (\(sig_len)) = \(Data(bytes: sig, count: sig_len).hexEncodedString())")
+        
+        
+        // test validity of signature
+        rc = EVP_DigestVerifyInit(md_ctx_verify, nil, EVP_sha256(),nil, myRSA.rsaKeypair)
+        // check rc = 1
+        
+        //        rc = EVP_DigestVerifyUpdate(md_ctx_verify, message, message.count)
+        rc = EVP_DigestUpdate(md_ctx_verify, message, message.count)
+        // check rc = 1
+
+        // Unlike other return values, this return indicates if signature verifies or not
+        rc = EVP_DigestVerifyFinal(md_ctx_verify, sig, sig_len)
+        print("signature verified = \(rc == 1 ? "OK" : "FAIL")")
+        
+        EVP_MD_CTX_destroy(md_ctx);
+        EVP_MD_CTX_destroy(md_ctx_verify);
+
+        return Data(bytes: sig, count: sig_len)
+    }
+
+    
+    
+    public func evpDigestSign1(of message: String) -> Data? {
+
+        print("Sign: \(message) ")
+        
+        let ctx = EVP_MD_CTX_create()
+        EVP_MD_CTX_init(ctx);
+
+//        guard ctx != NULL else {
+//            print("Ctx can't be created")
+//            return
+//        }
+        
+//        OpenSSL_add_all_digests()
+        // The digest table must be initialized using, for example, OpenSSL_add_all_digests() for these functions to work.
+//        let md = EVP_get_digestbyname("SHA256")
+        // check if md is not null. ALternative we can use functions like EVP_sha256()
+        
+        var rc = EVP_DigestSignInit(ctx, nil, EVP_sha1(), nil, myRSA.rsaKeypair)
+//        var rc = EVP_DigestSignInit(ctx, nil, md, nil, myRSA.rsaKeypair)
+        guard rc == 1 else {
+            print("EVP_DigestInit FAILED ")
+            return nil
+        }
+        
+        // EVP_DigestSignUpdate doesnt work on macOS
+        // rc = EVP_DigestSignUpdate(ctx, message, message.count)
+        rc = EVP_DigestUpdate(ctx, message, message.count)
+        guard rc == 1 else {
+            print("EVP_DigestSignUpdate failure: \( ERR_get_error())")
+            return nil
+        }
+        
+        var size: Int = Int(EVP_MD_size(EVP_sha1()))
+        let signature = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+        print("PRE size = \(size)")
+
+        print("PRE signature (\(Data(bytes: signature, count: size).count)) = \(Data(bytes: signature, count: size).hexEncodedString())")
+
+//        rc = EVP_DigestSignFinal(ctx, nil, &size)
+//        print("size = \(size)")
+//        print("rc = \(rc)")
+//        print("signature (\(Data(bytes: signature, count: size).count)) = \(Data(bytes: signature, count: size).hexEncodedString())")
+        
+
+        rc = EVP_DigestSignFinal(ctx, signature, &size)
+        print("size = \(size)")
+        print("signature (\(Data(bytes: signature, count: size).count)) = \(Data(bytes: signature, count: size).hexEncodedString())")
+
+        guard rc == 1, size > 0 else {
+            if let errorStr = ERR_reason_error_string(ERR_get_error()) {
+            let errorString = String(validatingUTF8: errorStr)!
+            print("EVP_DigestSignFinal failure: \( errorString)")
+            } else {
+                print("EVP_DigestSignFinal failure: nil")
+            }
+
+            return nil
+        }
+//        UnsafePointer<Int8>!
+        EVP_MD_CTX_cleanup(ctx);
+        EVP_MD_CTX_destroy(ctx);
+
+        return Data(bytes: signature, count: size)
     }
     
 }

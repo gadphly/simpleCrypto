@@ -13,11 +13,82 @@ class myRSA: NSObject {
     let RSA_KEY_LENGTH:Int32 = 2048;
     let PUB_EXP:UInt = 3;
 
+    // Create an RSA key from both a hardcoded string as well as a file
+    public func readRSAKey() throws {
+
+        let pubKey: String = "-----BEGIN PUBLIC KEY-----\nMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDTJzHdZaCCBXJojhEMTJ3yIVsw\nKpsdBIl/8InTkuL6NuCImSRJ3bvNZNOexepFybDrSHuKlAH3IFcY5VUamkSX+e0O\nxT5ho0TgBULr3vNj58oDT5ejFjYx2Zd8ZcpAqrVcKKJj2ueZajr1Azf+h8Pxhdf0\nuRVurAkltDfWqxKTGwIDAQAB\n-----END PUBLIC KEY-----"
+        let path = URL(fileURLWithPath: #file).appendingPathComponent("../../../certs/private.pem").standardized
+        print("path - \(path.path)")
+        let priKey = try String(contentsOf: path, encoding: String.Encoding.ascii)
+
+        let bio = BIO_new(BIO_s_mem())
+        var rsa = RSA_new()
+        defer {
+            RSA_free(rsa);
+            BIO_free_all(bio);
+        }
+
+        guard bio != nil, rsa != nil else {
+            print("BIO_new, RSA_new failure: \( ERR_get_error())")
+            return
+        }
+        // BIO_write(bio, (void*)key, strlen((const char*)key));
+        // convert String to Data to UnsafeRawPointer
+        var keyData = pubKey.data(using: String.Encoding.utf8)!
+        var len: Int32 = 0
+        print("public key = \(String(data: keyData, encoding: String.Encoding.ascii) ?? "NULL"))")
+        
+        _ = keyData.withUnsafeBytes { (k: UnsafePointer<UInt8>)  in
+            len = BIO_write(bio, k, Int32(keyData.count))
+            
+            print("BIO len = \(len)")
+        }
+        guard len != 0 else {
+            print("BIO_write failure: \( ERR_get_error())")
+            return
+        }
+
+        // PEM_read_bio_PUBKEY
+        // RSA *PEM_read_bio_RSA_PUBKEY(BIO *bp, RSA **x, pem_password_cb *cb, void *u);
+        // If both cb and u are NULL then the default callback routine is used which will typically prompt for the passphrase on the current terminal with echoing turned off.
+        let evp_key = PEM_read_bio_PUBKEY(bio, nil, nil, nil)
+        rsa = EVP_PKEY_get1_RSA( evp_key)
+
+        guard rsa != nil, evp_key != nil else  {
+            print("EVP_PKEY_get1_RSA failure: \( ERR_get_error())")
+            return
+        }
+        print("public rsa = \(String(describing: rsa)) ")
+        
+        // Private key
+        keyData = priKey.data(using: String.Encoding.utf8)!
+        print("private key = \(String(data: keyData, encoding: String.Encoding.ascii) ?? "NULL"))")
+        
+        _ = keyData.withUnsafeBytes { (k: UnsafePointer<UInt8>)  in
+            let len = BIO_write(bio, k, Int32(keyData.count))
+            print("BIO len = \(len)")
+        }
+        guard len != 0 else {
+            print("BIO_write failure: \( ERR_get_error())")
+            return
+        }
+
+        let evp_pri_key = PEM_read_bio_PrivateKey(bio, nil, nil, nil)
+        rsa = EVP_PKEY_get1_RSA( evp_pri_key )
+        guard rsa != nil, evp_key != nil else  {
+            print("EVP_PKEY_get1_RSA failure: \( ERR_get_error())")
+            return
+        }
+        print("private rsa = \(String(describing: rsa)) ")
+    }
+    
 
     public func rsaEncDec() {
 
         // Generate key pair
         print("Generating RSA (\(RSA_KEY_LENGTH)) bits keypair...");
+        
+        // This function has become deprecated and we should be using RSA_generate_key_ex
         
         //RSA *keypair = RSA_generate_key(RSA_KEY_LENGTH, PUB_EXP, NULL, NULL);
         guard let keypair = RSA_generate_key(RSA_KEY_LENGTH, PUB_EXP, nil, nil) else {
@@ -26,9 +97,6 @@ class myRSA: NSObject {
         }
         
         // To get the C-string PEM form:
-        //BIO *pri = BIO_new(BIO_s_mem());
-        //BIO *pub = BIO_new(BIO_s_mem());
-        
         guard let pri = BIO_new(BIO_s_mem()), let pub = BIO_new(BIO_s_mem()) else {
             abort()
         }

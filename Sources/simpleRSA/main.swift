@@ -1,13 +1,17 @@
 import Foundation
 import OpenSSL
 
-func main() {
-
-    let plaintext = "In those days spirits were brave, the stakes were high, men were real men, women were real women and small furry creatures from Alpha Centauri were real small furry creatures from Alpha Centauri."
+func main() throws {
+//    try v.readRSAKey()
     
-    print("Original plaintext (\(plaintext.count)) = " + plaintext + "\n\n")
-    testAESEnv(with: plaintext)
-    testRSAEnv(with: plaintext)
+    let plaintext = "In those days spirits were brave, the stakes were high, men were real men, women were real women and small furry creatures from Alpha Centauri were real small furry creatures from Alpha Centauri."
+//    let plaintext = "In those days"
+
+    testRSASign(with: plaintext)
+
+//    print("Original plaintext (\(plaintext.count)) = " + plaintext + "\n\n")
+//    testAESEnv(with: plaintext)
+//    testRSAEnv(with: plaintext)
 
 }
 
@@ -38,7 +42,7 @@ func testAESEnv(with plaintext: String) {
         } else {
             print("ERROR: evpAESDecrypt")
         }
-        
+
         if ( decryptedtext == Data(bytes: plaintext, count: plaintext.count) ) {
             print("\n\nHey congrats! You have successfully encrypted-then-decrypted a string with AES256!\nWhat's next on your bucket list?\n\n")
         } else {
@@ -49,6 +53,31 @@ func testAESEnv(with plaintext: String) {
         print("ERROR: evpAESEncrypt")
     }
 }
+
+func testReadRSAKeys() {
+    let v = myRSA()
+    do {
+        try v.readRSAKey()
+    }
+    catch {
+        print("FAILURE is not an option")
+    }
+}
+
+func testRSASign(with message: String) {
+    let v = myRSA()
+
+    guard v.generateRSAKey() == true else {
+        print("ERROR: generateRSAKey")
+        exit(0)
+    }
+
+//    if let signature = v.evpDigestSignVerifyCustom(of: message) {
+    if let signature = v.evpDigestSignVerifyVanilla(of: message) {
+        print("signature (\(signature.count)) = \(signature.hexEncodedString())")
+    }
+}
+
 
 func testRSAEnv(with plaintext: String) {
 
@@ -98,6 +127,6 @@ func testRSAEnv(with plaintext: String) {
     v.evpRSADeinit()
 }
 
-main()
+try main()
 
 
