@@ -257,8 +257,8 @@ extension myRSA {
         rc = EVP_DigestVerifyFinal(md_ctx_verify, sig, sig_len)
         print("signature verified = \(rc == 1 ? "OK" : "FAIL")")
         
-        EVP_MD_CTX_destroy(md_ctx);
-        EVP_MD_CTX_destroy(md_ctx_verify);
+        EVP_MD_CTX_destroy(md_ctx)
+        EVP_MD_CTX_destroy(md_ctx_verify)
         // EVP_PKEY_free(myRSA.rsaKeypair)
 
         return Data(bytes: sig, count: sig_len)
@@ -311,8 +311,10 @@ extension myRSA {
         rc = EVP_DigestVerifyFinal(md_ctx_verify, sig, sig_len)
         print("signature verified = \(rc == 1 ? "OK" : "FAIL")")
         
-        EVP_MD_CTX_destroy(md_ctx);
-        EVP_MD_CTX_destroy(md_ctx_verify);
+        // pkey_ctx is "owned" by md_ctx. Just free md_ctx and pkey_ctx also gets freed
+        EVP_MD_CTX_destroy(md_ctx)
+        EVP_MD_CTX_destroy(md_ctx_verify)
+        // EVP_PKEY_free(myRSA.rsaKeypair)
 
         return Data(bytes: sig, count: sig_len)
     }
