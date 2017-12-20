@@ -5,7 +5,6 @@ func main() throws {
 //    try v.readRSAKey()
     
     let plaintext = "In those days spirits were brave, the stakes were high, men were real men, women were real women and small furry creatures from Alpha Centauri were real small furry creatures from Alpha Centauri."
-//    let plaintext = "In those days"
 
     testRSASign(with: plaintext)
 
@@ -69,7 +68,7 @@ func testRSASign(with message: String) {
 
     guard v.generateRSAKey() == true else {
         print("ERROR: generateRSAKey")
-        exit(0)
+        return
     }
 
 //    if let signature = v.evpDigestSignVerifyCustom(of: message) {
@@ -86,7 +85,7 @@ func testRSAEnv(with plaintext: String) {
     var status = v.evpRSAInit()
     guard status == true else {
         print("ERROR: evpRSAInit")
-        exit(0)
+        return
     }
     
     var ciphertextRSA: Data?
@@ -97,7 +96,7 @@ func testRSAEnv(with plaintext: String) {
     status = v.generateRSAKey()
     guard status == true else {
         print("ERROR: generateRSAKey")
-        exit(0)
+        return
     }
     
     ( ciphertextRSA, encKey, iv ) = v.rsaEncrypt(plaintext: plaintext)
