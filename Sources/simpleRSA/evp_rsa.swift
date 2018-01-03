@@ -224,18 +224,23 @@ extension myRSA {
         rc = EVP_DigestUpdate(md_ctx, message, message.count)
         // check rc = 1
 
-        // Determine the size of the signature.
-        var sig_len: Int = Int(EVP_PKEY_size(myRSA.rsaKeypair))
-        let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
+        // Determine the size of the signature: there are 2 ways as shown below. The latter is the correct one to use.
+        // This is the maximum bound on the size of the signature before the signature is created.
+//        var sig_len: Int = Int(EVP_PKEY_size(myRSA.rsaKeypair))
+//        let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
 
-        // Alternatively, we can use the following method to get the size of the signature
-//        rc = EVP_DigestSignFinal(md_ctx, nil, &sig_len)
+        // Alternatively, we can use the following method to get the actual size of the signature that is generated (which could be smaller)
+        var sig_len: Int = 0
+        rc = EVP_DigestSignFinal(md_ctx, nil, &sig_len)
+        // check rc = 1
 //        print("lengths = \(sig_len), \(EVP_PKEY_size(myRSA.rsaKeypair)) ")
 //        if (sig_len != EVP_PKEY_size(myRSA.rsaKeypair)) {
 //            print("These two signature lengths should match! ")
 //            return nil
 //        }
+        let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
 
+        
         rc = EVP_DigestSignFinal(md_ctx, sig, &sig_len)
         guard rc == 1 else {
             print("EVP_DigestSignFinal failure: \( ERR_get_error())")
@@ -276,33 +281,42 @@ extension myRSA {
         // custom signing
         var pkey_ctx = EVP_PKEY_CTX_new(myRSA.rsaKeypair, nil)
         
-//        EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)
-//        complex macro need to be replaced
-        EVP_PKEY_CTX_ctrl(pkey_ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, RSA_X931_PADDING, nil)
-//        EVP_PKEY_CTX_set_signature_md()
-        
         var rc = EVP_DigestSignInit(md_ctx, &pkey_ctx, EVP_sha256(), nil, myRSA.rsaKeypair)
         // check rc = 1
         
-        // rc = EVP_DigestSignUpdate(md_ctx, message, message.count)
-        // complex macro, so replace with what's in evp.h
+        // Now that Init has initialized pkey_ctx, set the options we want
+        //        EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)
+        //        complex macro need to be replaced
+        EVP_PKEY_CTX_ctrl(pkey_ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, RSA_X931_PADDING, nil)
+        //        EVP_PKEY_CTX_set_signature_md()
+
+        
         rc = EVP_DigestUpdate(md_ctx, message, message.count)
         // check rc = 1
         
-        // Determine the size of the signature.
-        var sig_len: Int = Int(EVP_PKEY_size(myRSA.rsaKeypair))
+        // Determine the size of the actual signature
+        var sig_len: Int = 0
+        rc = EVP_DigestSignFinal(md_ctx, nil, &sig_len)
+        // check rc = 1
         let sig = UnsafeMutablePointer<UInt8>.allocate(capacity: sig_len)
         
         rc = EVP_DigestSignFinal(md_ctx, sig, &sig_len)
         print("Signed = \(rc == 1 ? "OK" : "FAIL")")
         
+        // pkey_ctx is "owned" by md_ctx. Just free md_ctx and pkey_ctx also gets freed
+        EVP_MD_CTX_destroy(md_ctx)
+
+        
 //        print("signature (\(sig_len)) = \(Data(bytes: sig, count: sig_len).hexEncodedString())")
         
         
         // test validity of signature
-        rc = EVP_DigestVerifyInit(md_ctx_verify, nil, EVP_sha256(),nil, myRSA.rsaKeypair)
+        rc = EVP_DigestVerifyInit(md_ctx_verify, &pkey_ctx, EVP_sha256(),nil, myRSA.rsaKeypair)
         // check rc = 1
         
+        // Now that Init has initialized pkey_ctx, set the padding options we want
+        EVP_PKEY_CTX_ctrl(pkey_ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, RSA_X931_PADDING, nil)
+
         //        rc = EVP_DigestVerifyUpdate(md_ctx_verify, message, message.count)
         rc = EVP_DigestUpdate(md_ctx_verify, message, message.count)
         // check rc = 1
@@ -312,7 +326,6 @@ extension myRSA {
         print("signature verified = \(rc == 1 ? "OK" : "FAIL")")
         
         // pkey_ctx is "owned" by md_ctx. Just free md_ctx and pkey_ctx also gets freed
-        EVP_MD_CTX_destroy(md_ctx)
         EVP_MD_CTX_destroy(md_ctx_verify)
         // EVP_PKEY_free(myRSA.rsaKeypair)
 
